@@ -1,0 +1,58 @@
+{
+  "name": "caudalia",
+  "description": "Sistema de extracción de datos de caudalímetros usando OCR y detección de áreas rojas",
+  "version": "1.0.0",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+  "ports": [
+    {
+      "container": 5000,
+      "protocol": "http"
+    }
+  ],
+  "env": [
+    {
+      "name": "FLASK_ENV",
+      "value": "production"
+    },
+    {
+      "name": "PORT",
+      "value": "5000"
+    },
+    {
+      "name": "UPLOAD_FOLDER",
+      "value": "/data/uploads"
+    },
+    {
+      "name": "TESSDATA_PREFIX",
+      "value": "/usr/share/tesseract-ocr/5/tessdata"
+    }
+  ],
+  "volumes": [
+    {
+      "path": "/data/uploads",
+      "size": "5GB",
+      "description": "Imágenes temporales subidas por usuarios"
+    },
+    {
+      "path": "/data/logs",
+      "size": "1GB",
+      "description": "Logs de la aplicación"
+    },
+    {
+      "path": "/data/cache",
+      "size": "500MB",
+      "description": "Cache de procesamiento"
+    }
+  ],
+  "healthcheck": {
+    "path": "/health",
+    "interval": 30,
+    "timeout": 10,
+    "retries": 3
+  },
+  "restart": "always"
+}
+

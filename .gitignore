@@ -1,0 +1,32 @@
+# Entorno virtual
+venv/
+env/
+ENV/
+
+# Archivos temporales
+uploads/
+*.jpg
+*.jpeg
+*.png
+*.gif
+*_debug.jpg
+*_extraccion.json
+*_resultado.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+

@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  caudalia:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: caudalia
+    ports:
+      - "5000:5000"
+    environment:
+      # Flask Configuration
+      - FLASK_APP=app.py
+      - FLASK_ENV=production
+      - PORT=5000
+      
+      # Tesseract OCR
+      - TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata
+      
+      # Server
+      - HOST=0.0.0.0
+      
+    volumes:
+      # Datos persistentes
+      - uploads_data:/data/uploads
+      - logs_data:/data/logs
+      - cache_data:/data/cache
+    
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    networks:
+      - app_network
+
+volumes:
+  uploads_data:
+    driver: local
+  logs_data:
+    driver: local
+  cache_data:
+    driver: local
+
+networks:
+  app_network:
+    driver: bridge
+
