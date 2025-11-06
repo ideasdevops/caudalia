@@ -13,7 +13,7 @@ from werkzeug.utils import secure_filename
 import base64
 from io import BytesIO
 
-from extractor_rojo import procesar_caudalimetro
+from extractor_rojo import procesar_caudalimetro, procesar_area_especifica
 
 app = Flask(__name__)
 CORS(app)  # Permitir CORS para acceso desde móviles
@@ -107,6 +107,33 @@ def index():
             border-radius: 10px;
             margin-bottom: 20px;
             display: none;
+        }
+        
+        .preview-wrapper {
+            position: relative;
+            display: none;
+            margin-bottom: 20px;
+        }
+        
+        #selectionCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 10px;
+            cursor: crosshair;
+            display: none;
+        }
+        
+        .selection-info {
+            background: rgba(102, 126, 234, 0.9);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            display: none;
+            font-size: 14px;
         }
         
         .button-group {
@@ -252,14 +279,23 @@ def index():
         <div class="camera-container">
             <video id="video" autoplay playsinline></video>
             <canvas id="canvas"></canvas>
-            <img id="preview" class="preview-image" alt="Vista previa">
+            <div class="preview-wrapper" id="previewWrapper">
+                <img id="preview" class="preview-image" alt="Vista previa">
+                <canvas id="selectionCanvas"></canvas>
+            </div>
+        </div>
+        
+        <div class="selection-info" id="selectionInfo">
+            Selecciona un área arrastrando sobre la imagen
         </div>
         
         <div class="button-group">
             <button id="startCamera" class="btn-primary">📷 Activar Cámara</button>
             <button id="capture" class="btn-success" style="display: none;">📸 Capturar</button>
             <button id="retake" class="btn-secondary" style="display: none;">🔄 Volver a Capturar</button>
-            <button id="process" class="btn-primary" style="display: none;">⚙️ Procesar Imagen</button>
+            <button id="selectArea" class="btn-primary" style="display: none;">🎯 Seleccionar Área</button>
+            <button id="process" class="btn-primary" style="display: none;">⚙️ Procesar Imagen Completa</button>
+            <button id="processArea" class="btn-success" style="display: none;">✅ Procesar Área Seleccionada</button>
             
             <div class="file-input-wrapper">
                 <label for="fileInput" class="file-input-label">📁 Seleccionar desde Galería</label>
@@ -284,10 +320,15 @@ def index():
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const preview = document.getElementById('preview');
+        const previewWrapper = document.getElementById('previewWrapper');
+        const selectionCanvas = document.getElementById('selectionCanvas');
+        const selectionInfo = document.getElementById('selectionInfo');
         const startBtn = document.getElementById('startCamera');
         const captureBtn = document.getElementById('capture');
         const retakeBtn = document.getElementById('retake');
+        const selectAreaBtn = document.getElementById('selectArea');
         const processBtn = document.getElementById('process');
+        const processAreaBtn = document.getElementById('processArea');
         const fileInput = document.getElementById('fileInput');
         const loading = document.getElementById('loading');
         const error = document.getElementById('error');
@@ -296,6 +337,10 @@ def index():
         
         let stream = null;
         let currentImageData = null;
+        let isSelecting = false;
+        let selectionStart = { x: 0, y: 0 };
+        let selectionEnd = { x: 0, y: 0 };
+        let selectedArea = null;
         
         // Activar cámara
         startBtn.addEventListener('click', async () => {
@@ -329,11 +374,15 @@ def index():
                 reader.onload = (e) => {
                     currentImageData = e.target.result;
                     preview.src = currentImageData;
-                    preview.style.display = 'block';
+                    preview.onload = () => {
+                        setupPreview();
+                    };
+                    previewWrapper.style.display = 'block';
                     video.style.display = 'none';
                     captureBtn.style.display = 'none';
                     retakeBtn.style.display = 'block';
                     processBtn.style.display = 'block';
+                    selectAreaBtn.style.display = 'block';
                     
                     // Detener cámara
                     if (stream) {
@@ -347,37 +396,193 @@ def index():
         
         // Volver a capturar
         retakeBtn.addEventListener('click', () => {
-            preview.style.display = 'none';
+            previewWrapper.style.display = 'none';
+            selectionCanvas.style.display = 'none';
+            selectionInfo.style.display = 'none';
             currentImageData = null;
+            selectedArea = null;
             retakeBtn.style.display = 'none';
             processBtn.style.display = 'none';
+            selectAreaBtn.style.display = 'none';
+            processAreaBtn.style.display = 'none';
             results.style.display = 'none';
             startBtn.style.display = 'block';
             hideError();
         });
         
-        // Seleccionar desde galería
-        fileInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    currentImageData = e.target.result;
-                    preview.src = currentImageData;
-                    preview.style.display = 'block';
-                    video.style.display = 'none';
-                    captureBtn.style.display = 'none';
-                    retakeBtn.style.display = 'block';
-                    processBtn.style.display = 'block';
-                    
-                    if (stream) {
-                        stream.getTracks().forEach(track => track.stop());
-                        stream = null;
-                    }
-                };
-                reader.readAsDataURL(file);
+        // Configurar preview y canvas de selección
+        function setupPreview() {
+            const rect = preview.getBoundingClientRect();
+            selectionCanvas.width = preview.offsetWidth;
+            selectionCanvas.height = preview.offsetHeight;
+        }
+        
+        // Activar modo de selección
+        selectAreaBtn.addEventListener('click', () => {
+            isSelecting = true;
+            selectedArea = null;
+            selectionCanvas.style.display = 'block';
+            selectionInfo.style.display = 'block';
+            selectionCanvas.style.cursor = 'crosshair';
+            processAreaBtn.style.display = 'none';
+        });
+        
+        // Manejar selección de área
+        function getEventPos(e) {
+            const rect = selectionCanvas.getBoundingClientRect();
+            const scaleX = preview.naturalWidth / preview.offsetWidth;
+            const scaleY = preview.naturalHeight / preview.offsetHeight;
+            return {
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top) * scaleY
+            };
+        }
+        
+        selectionCanvas.addEventListener('mousedown', (e) => {
+            if (!isSelecting) return;
+            const pos = getEventPos(e);
+            selectionStart = pos;
+            selectionEnd = pos;
+        });
+        
+        selectionCanvas.addEventListener('mousemove', (e) => {
+            if (!isSelecting) return;
+            if (e.buttons === 1) {
+                selectionEnd = getEventPos(e);
+                drawSelection();
             }
         });
+        
+        selectionCanvas.addEventListener('mouseup', (e) => {
+            if (!isSelecting) return;
+            selectionEnd = getEventPos(e);
+            drawSelection();
+            finalizeSelection();
+        });
+        
+        // Touch events para móviles
+        selectionCanvas.addEventListener('touchstart', (e) => {
+            if (!isSelecting) return;
+            e.preventDefault();
+            const touch = e.touches[0];
+            const pos = getEventPos(touch);
+            selectionStart = pos;
+            selectionEnd = pos;
+        });
+        
+        selectionCanvas.addEventListener('touchmove', (e) => {
+            if (!isSelecting) return;
+            e.preventDefault();
+            const touch = e.touches[0];
+            selectionEnd = getEventPos(touch);
+            drawSelection();
+        });
+        
+        selectionCanvas.addEventListener('touchend', (e) => {
+            if (!isSelecting) return;
+            e.preventDefault();
+            finalizeSelection();
+        });
+        
+        function drawSelection() {
+            const ctx = selectionCanvas.getContext('2d');
+            ctx.clearRect(0, 0, selectionCanvas.width, selectionCanvas.height);
+            
+            const x = Math.min(selectionStart.x / (preview.naturalWidth / preview.offsetWidth), 
+                             selectionEnd.x / (preview.naturalWidth / preview.offsetWidth));
+            const y = Math.min(selectionStart.y / (preview.naturalHeight / preview.offsetHeight),
+                             selectionEnd.y / (preview.naturalHeight / preview.offsetHeight));
+            const w = Math.abs(selectionEnd.x - selectionStart.x) / (preview.naturalWidth / preview.offsetWidth);
+            const h = Math.abs(selectionEnd.y - selectionStart.y) / (preview.naturalHeight / preview.offsetHeight);
+            
+            // Dibujar rectángulo de selección
+            ctx.strokeStyle = '#667eea';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.strokeRect(x, y, w, h);
+            
+            // Relleno semitransparente
+            ctx.fillStyle = 'rgba(102, 126, 234, 0.2)';
+            ctx.fillRect(x, y, w, h);
+        }
+        
+        function finalizeSelection() {
+            const x = Math.min(selectionStart.x, selectionEnd.x);
+            const y = Math.min(selectionStart.y, selectionEnd.y);
+            const ancho = Math.abs(selectionEnd.x - selectionStart.x);
+            const alto = Math.abs(selectionEnd.y - selectionStart.y);
+            
+            if (ancho > 10 && alto > 10) {
+                selectedArea = { x, y, ancho, alto };
+                processAreaBtn.style.display = 'block';
+                selectionInfo.textContent = `Área seleccionada: ${Math.round(ancho)}x${Math.round(alto)}px`;
+            }
+        }
+        
+        // Procesar área seleccionada
+        processAreaBtn.addEventListener('click', async () => {
+            if (!selectedArea || !currentImageData) return;
+            
+            loading.style.display = 'block';
+            results.style.display = 'none';
+            hideError();
+            processAreaBtn.disabled = true;
+            
+            try {
+                const blob = await (await fetch(currentImageData)).blob();
+                const formData = new FormData();
+                formData.append('image', blob, 'caudalimetro.jpg');
+                formData.append('x', Math.round(selectedArea.x));
+                formData.append('y', Math.round(selectedArea.y));
+                formData.append('ancho', Math.round(selectedArea.ancho));
+                formData.append('alto', Math.round(selectedArea.alto));
+                
+                const response = await fetch('/process-area', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    showError(data.error);
+                } else {
+                    displayAreaResults(data);
+                }
+            } catch (err) {
+                showError('Error al procesar área: ' + err.message);
+            } finally {
+                loading.style.display = 'none';
+                processAreaBtn.disabled = false;
+            }
+        });
+        
+        function displayAreaResults(data) {
+            resultsContent.innerHTML = '';
+            
+            if (data.texto_una_linea || data.texto_extraido) {
+                const texto = data.texto_una_linea || data.texto_extraido;
+                const div = document.createElement('div');
+                div.className = 'result-item';
+                div.innerHTML = `
+                    <strong>Texto Extraído (Izquierda a Derecha):</strong>
+                    <div class="result-value" style="font-size: 20px; font-weight: bold; color: #667eea;">${texto}</div>
+                `;
+                resultsContent.appendChild(div);
+            }
+            
+            if (data.numeros_encontrados && data.numeros_encontrados.length > 0) {
+                const div = document.createElement('div');
+                div.className = 'result-item';
+                div.innerHTML = `
+                    <strong>Números Detectados:</strong>
+                    <div class="result-value">${data.numeros_encontrados.map(n => n.valor).join(', ')}</div>
+                `;
+                resultsContent.appendChild(div);
+            }
+            
+            results.style.display = 'block';
+        }
         
         // Procesar imagen
         processBtn.addEventListener('click', async () => {
@@ -493,6 +698,65 @@ def process_image():
                 str(filepath),
                 idioma='spa',
                 guardar_debug=False
+            )
+            
+            # Limpiar archivo temporal
+            filepath.unlink()
+            
+            return jsonify(resultados)
+        
+        except Exception as e:
+            # Limpiar archivo en caso de error
+            if filepath.exists():
+                filepath.unlink()
+            raise e
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/process-area', methods=['POST'])
+def process_area():
+    """Procesa un área específica de una imagen subida."""
+    try:
+        if 'image' not in request.files:
+            return jsonify({'error': 'No se proporcionó ninguna imagen'}), 400
+        
+        file = request.files['image']
+        
+        if file.filename == '':
+            return jsonify({'error': 'No se seleccionó ningún archivo'}), 400
+        
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'Tipo de archivo no permitido'}), 400
+        
+        # Obtener coordenadas del área
+        data = request.form
+        try:
+            x = int(data.get('x', 0))
+            y = int(data.get('y', 0))
+            ancho = int(data.get('ancho', 0))
+            alto = int(data.get('alto', 0))
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Coordenadas del área inválidas'}), 400
+        
+        if ancho <= 0 or alto <= 0:
+            return jsonify({'error': 'El área seleccionada debe tener dimensiones válidas'}), 400
+        
+        # Guardar archivo temporalmente
+        filename = secure_filename(file.filename)
+        filepath = UPLOAD_FOLDER / filename
+        file.save(str(filepath))
+        
+        try:
+            # Procesar área específica
+            resultados = procesar_area_especifica(
+                str(filepath),
+                x=x,
+                y=y,
+                ancho=ancho,
+                alto=alto,
+                idioma='spa'
             )
             
             # Limpiar archivo temporal

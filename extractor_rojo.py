@@ -106,17 +106,19 @@ def expandir_area_roja(x: int, y: int, w: int, h: int, ancho_img: int, alto_img:
 
 
 def extraer_texto_de_area(imagen: Image.Image, area: Tuple[int, int, int, int], 
-                          idioma: str = 'spa') -> str:
+                          idioma: str = 'spa', modo_linea: bool = True) -> str:
     """
     Extrae texto de un área específica de la imagen.
+    Optimizado para lectura de izquierda a derecha en una sola línea.
     
     Args:
         imagen: Imagen PIL
         area: Tupla (x, y, w, h) con las coordenadas
         idioma: Idioma para OCR
+        modo_linea: Si True, fuerza lectura en una sola línea (izquierda a derecha)
         
     Returns:
-        Texto extraído
+        Texto extraído en una sola línea
     """
     x, y, w, h = area
     
@@ -136,11 +138,78 @@ def extraer_texto_de_area(imagen: Image.Image, area: Tuple[int, int, int, int],
     enhancer = ImageEnhance.Sharpness(area_recortada)
     area_recortada = enhancer.enhance(2.0)
     
+    # Configuración OCR optimizada para lectura de izquierda a derecha
+    # PSM 7 = Tratar la imagen como una sola línea de texto
+    # PSM 6 = Asumir un bloque uniforme de texto
+    psm_mode = '7' if modo_linea else '6'
+    
+    config = f'--psm {psm_mode} -c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÁÉÍÓÚáéíóúÑñ.,;:()[]{{}}!?@#$%&*-+=/ m³hΣ+−'
+    
     # OCR en el área
-    config = '--psm 7 -c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÁÉÍÓÚáéíóúÑñ.,;:()[]{}!?@#$%&*-+=/ m³hΣ+−'
     texto = pytesseract.image_to_string(area_recortada, lang=idioma, config=config)
     
+    # Limpiar el texto: eliminar saltos de línea y espacios múltiples
+    texto = ' '.join(texto.split())
+    
     return texto.strip()
+
+
+def procesar_area_especifica(ruta_imagen: str, x: int, y: int, ancho: int, alto: int,
+                             idioma: str = 'spa') -> Dict[str, any]:
+    """
+    Procesa un área específica de la imagen para extraer texto.
+    
+    Args:
+        ruta_imagen: Ruta a la imagen
+        x, y: Coordenadas del punto superior izquierdo del área
+        ancho, alto: Dimensiones del área a procesar
+        idioma: Idioma para OCR
+        
+    Returns:
+        Diccionario con los datos extraídos
+    """
+    ruta = Path(ruta_imagen)
+    if not ruta.exists():
+        raise FileNotFoundError(f"La imagen {ruta_imagen} no existe")
+    
+    # Cargar imagen
+    imagen = Image.open(ruta_imagen)
+    img_ancho, img_alto = imagen.size
+    
+    # Asegurar que las coordenadas estén dentro de la imagen
+    x = max(0, min(x, img_ancho))
+    y = max(0, min(y, img_alto))
+    ancho = max(1, min(ancho, img_ancho - x))
+    alto = max(1, min(alto, img_alto - y))
+    
+    # Recortar el área específica
+    area_recortada = imagen.crop((x, y, x + ancho, y + alto))
+    
+    # Extraer texto del área (modo línea única, izquierda a derecha)
+    texto = extraer_texto_de_area(imagen, (x, y, ancho, alto), idioma, modo_linea=True)
+    
+    # Extraer números del texto
+    numeros = extraer_numeros(texto)
+    
+    # Crear texto en una sola línea (izquierda a derecha)
+    texto_linea = ' '.join(texto.split())
+    
+    return {
+        'archivo': ruta.name,
+        'area_seleccionada': {
+            'x': x,
+            'y': y,
+            'ancho': ancho,
+            'alto': alto
+        },
+        'texto_extraido': texto_linea,
+        'texto_una_linea': texto_linea,  # Texto en una sola línea
+        'numeros_encontrados': numeros,
+        'resumen': {
+            'total_numeros': len(numeros),
+            'texto_completo': texto_linea
+        }
+    }
 
 
 def procesar_caudalimetro(ruta_imagen: str, idioma: str = 'spa', 
