@@ -32,7 +32,7 @@ WORKDIR /build
 
 # Copiar requirements y instalar dependencias Python
 COPY requirements.txt .
-RUN pip install --user --no-warn-script-location -r requirements.txt
+RUN pip install --no-warn-script-location -r requirements.txt
 
 # ===============================================
 # Etapa 2: Runtime
@@ -53,7 +53,6 @@ LABEL app.description="${APP_DESCRIPTION}"
 # Variables de entorno
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PATH=/root/.local/bin:$PATH \
     FLASK_APP=app.py \
     FLASK_ENV=production \
     PORT=5000
@@ -95,8 +94,13 @@ RUN useradd -m -u 1000 -s /bin/bash appuser && \
 # ===============================================
 # COPIA DE DEPENDENCIAS Y CÓDIGO
 # ===============================================
-# Copiar dependencias Python desde builder
-COPY --from=builder /root/.local /root/.local
+# Copiar dependencias Python desde builder (instaladas globalmente)
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Asegurar permisos correctos en los binarios
+RUN chmod -R 755 /usr/local/bin && \
+    chmod -R 755 /usr/local/lib/python3.11/site-packages
 
 # Establecer directorio de trabajo
 WORKDIR /app
