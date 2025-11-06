@@ -72,6 +72,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsm6 \
     libxext6 \
     libxrender1 \
+    # Dependencias para lectura de códigos QR (zbar)
+    libzbar0 \
     # Utilidades
     curl \
     bash \

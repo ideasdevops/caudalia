@@ -14,6 +14,7 @@ import base64
 from io import BytesIO
 
 from extractor_rojo import procesar_caudalimetro, procesar_area_especifica
+from qr_processor import escanear_qr_desde_base64, parsear_url_google_forms
 
 app = Flask(__name__)
 CORS(app)  # Permitir CORS para acceso desde móviles
@@ -557,11 +558,14 @@ def index():
             }
         });
         
+        let valorMedidorExtraido = null;
+        
         function displayAreaResults(data) {
             resultsContent.innerHTML = '';
             
             if (data.texto_una_linea || data.texto_extraido) {
                 const texto = data.texto_una_linea || data.texto_extraido;
+                valorMedidorExtraido = texto;
                 const div = document.createElement('div');
                 div.className = 'result-item';
                 div.innerHTML = `
@@ -579,6 +583,22 @@ def index():
                     <div class="result-value">${data.numeros_encontrados.map(n => n.valor).join(', ')}</div>
                 `;
                 resultsContent.appendChild(div);
+            }
+            
+            // Agregar botón para escanear QR y rellenar formulario
+            if (valorMedidorExtraido) {
+                const qrDiv = document.createElement('div');
+                qrDiv.className = 'result-item';
+                qrDiv.style.background = '#e7f3ff';
+                qrDiv.style.borderLeft = '4px solid #2196F3';
+                qrDiv.innerHTML = `
+                    <strong>📋 Siguiente Paso: Rellenar Formulario</strong>
+                    <p style="margin: 10px 0; color: #666;">Escanea el código QR del formulario de Google para rellenarlo automáticamente</p>
+                    <button id="scanQRBtn" class="btn-primary" style="width: 100%; margin-top: 10px;">
+                        📷 Escanear QR del Formulario
+                    </button>
+                `;
+                resultsContent.appendChild(qrDiv);
             }
             
             results.style.display = 'block';
@@ -664,6 +684,152 @@ def index():
         
         function hideError() {
             error.style.display = 'none';
+        }
+        
+        // Funcionalidad de escaneo de QR y rellenado de formulario
+        let qrStream = null;
+        let qrVideo = null;
+        let qrCanvas = null;
+        
+        // Escuchar clics en el botón de escanear QR (se crea dinámicamente)
+        document.addEventListener('click', async (e) => {
+            if (e.target.id === 'scanQRBtn') {
+                iniciarEscaneoQR();
+            }
+        });
+        
+        async function iniciarEscaneoQR() {
+            try {
+                // Crear modal para escanear QR
+                const modal = document.createElement('div');
+                modal.id = 'qrModal';
+                modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 10000; display: flex; flex-direction: column; align-items: center; justify-content: center;';
+                modal.innerHTML = `
+                    <div style="background: white; padding: 20px; border-radius: 10px; max-width: 90%; text-align: center;">
+                        <h2 style="margin-bottom: 20px;">📷 Escanear Código QR</h2>
+                        <video id="qrVideo" autoplay playsinline style="width: 100%; max-width: 400px; border-radius: 10px;"></video>
+                        <canvas id="qrCanvas" style="display: none;"></canvas>
+                        <p style="margin: 15px 0; color: #666;">Apunta la cámara hacia el código QR del formulario</p>
+                        <button id="cerrarQR" class="btn-danger" style="margin-top: 10px;">Cerrar</button>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+                
+                qrVideo = document.getElementById('qrVideo');
+                qrCanvas = document.getElementById('qrCanvas');
+                
+                // Activar cámara
+                qrStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }
+                });
+                qrVideo.srcObject = qrStream;
+                
+                // Iniciar detección de QR
+                iniciarDeteccionQR();
+                
+                // Cerrar modal
+                document.getElementById('cerrarQR').addEventListener('click', cerrarEscaneoQR);
+                
+            } catch (err) {
+                showError('Error al acceder a la cámara: ' + err.message);
+            }
+        }
+        
+        function cerrarEscaneoQR() {
+            if (qrStream) {
+                qrStream.getTracks().forEach(track => track.stop());
+                qrStream = null;
+            }
+            const modal = document.getElementById('qrModal');
+            if (modal) {
+                modal.remove();
+            }
+        }
+        
+        async function iniciarDeteccionQR() {
+            if (!qrVideo || !qrCanvas) return;
+            
+            const ctx = qrCanvas.getContext('2d');
+            
+            function detectarQR() {
+                if (!qrVideo || qrVideo.readyState !== qrVideo.HAVE_ENOUGH_DATA) {
+                    requestAnimationFrame(detectarQR);
+                    return;
+                }
+                
+                qrCanvas.width = qrVideo.videoWidth;
+                qrCanvas.height = qrVideo.videoHeight;
+                ctx.drawImage(qrVideo, 0, 0, qrCanvas.width, qrCanvas.height);
+                
+                // Capturar frame y enviar al servidor para escanear
+                qrCanvas.toBlob(async (blob) => {
+                    try {
+                        const formData = new FormData();
+                        formData.append('image', blob, 'qr.jpg');
+                        
+                        const response = await fetch('/scan-qr', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.exito && data.es_google_forms) {
+                            // QR encontrado y es formulario de Google
+                            cerrarEscaneoQR();
+                            rellenarFormularioGoogle(data.url_formulario, valorMedidorExtraido);
+                        } else if (data.exito && !data.es_google_forms) {
+                            // QR encontrado pero no es formulario de Google
+                            showError('El QR code no apunta a un formulario de Google');
+                        }
+                        // Si no encuentra QR, continuar escaneando
+                    } catch (err) {
+                        console.error('Error al escanear QR:', err);
+                    }
+                }, 'image/jpeg', 0.9);
+                
+                // Continuar escaneando cada 500ms
+                setTimeout(detectarQR, 500);
+            }
+            
+            detectarQR();
+        }
+        
+        function rellenarFormularioGoogle(urlFormulario, valor) {
+            if (!valor) {
+                showError('No hay valor del medidor para rellenar');
+                return;
+            }
+            
+            // Abrir formulario en nueva ventana/iframe
+            const formWindow = window.open(urlFormulario, '_blank');
+            
+            // Intentar rellenar el formulario automáticamente
+            // Nota: Google Forms no permite rellenado directo desde JavaScript externo
+            // por políticas de seguridad. Mostramos instrucciones al usuario.
+            
+            const instrucciones = document.createElement('div');
+            instrucciones.className = 'result-item';
+            instrucciones.style.background = '#fff3cd';
+            instrucciones.style.borderLeft = '4px solid #ffc107';
+            instrucciones.innerHTML = `
+                <strong>📋 Instrucciones para Rellenar Formulario</strong>
+                <p style="margin: 10px 0;">Se abrió el formulario en una nueva ventana.</p>
+                <p style="margin: 10px 0;"><strong>Valor a ingresar:</strong></p>
+                <div style="background: white; padding: 15px; border-radius: 5px; font-size: 24px; font-weight: bold; color: #667eea; text-align: center; margin: 10px 0;">
+                    ${valor}
+                </div>
+                <p style="margin: 10px 0; color: #666;">
+                    Copia el valor de arriba y pégalo en el campo correspondiente del formulario.
+                </p>
+                <button onclick="navigator.clipboard.writeText('${valor}').then(() => alert('Valor copiado al portapapeles!'))" 
+                        class="btn-primary" style="width: 100%; margin-top: 10px;">
+                    📋 Copiar Valor al Portapapeles
+                </button>
+            `;
+            
+            resultsContent.appendChild(instrucciones);
+            results.style.display = 'block';
         }
     </script>
 </body>
@@ -772,6 +938,57 @@ def process_area():
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/scan-qr', methods=['POST'])
+def scan_qr():
+    """Escanea un código QR desde una imagen."""
+    try:
+        if 'image' not in request.files:
+            return jsonify({'error': 'No se proporcionó ninguna imagen'}), 400
+        
+        file = request.files['image']
+        
+        if file.filename == '':
+            return jsonify({'error': 'No se seleccionó ningún archivo'}), 400
+        
+        # Leer imagen como base64
+        file_data = file.read()
+        import base64
+        imagen_base64 = base64.b64encode(file_data).decode('utf-8')
+        imagen_base64 = f'data:image/jpeg;base64,{imagen_base64}'
+        
+        # Escanear QR
+        qr_content = escanear_qr_desde_base64(imagen_base64)
+        
+        if not qr_content:
+            return jsonify({
+                'error': 'No se encontró ningún código QR en la imagen',
+                'exito': False
+            }), 400
+        
+        # Verificar si es un formulario de Google
+        es_google_forms = 'docs.google.com/forms' in qr_content or 'forms.gle' in qr_content
+        
+        if es_google_forms:
+            form_info = parsear_url_google_forms(qr_content)
+            return jsonify({
+                'exito': True,
+                'qr_content': qr_content,
+                'es_google_forms': True,
+                'form_info': form_info,
+                'url_formulario': qr_content
+            })
+        else:
+            return jsonify({
+                'exito': True,
+                'qr_content': qr_content,
+                'es_google_forms': False,
+                'mensaje': 'El QR code no apunta a un formulario de Google'
+            })
+    
+    except Exception as e:
+        return jsonify({'error': str(e), 'exito': False}), 500
 
 
 @app.route('/health')
