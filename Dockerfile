@@ -65,9 +65,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-spa \
     tesseract-ocr-eng \
-    # Dependencias básicas para OpenCV (opencv-python incluye la mayoría)
+    # Dependencias básicas para OpenCV headless
     libglib2.0-0 \
     libgomp1 \
+    # Librerías adicionales para procesamiento de imágenes
+    libsm6 \
+    libxext6 \
+    libxrender1 \
     # Utilidades
     curl \
     bash \
