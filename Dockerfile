@@ -13,7 +13,7 @@
 # ===============================================
 
 # Etapa 1: Builder (para optimizar tamaño final)
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 # Variables de entorno para Python
 ENV PYTHONUNBUFFERED=1 \
@@ -66,12 +66,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-spa \
     tesseract-ocr-eng \
-    # Dependencias de OpenCV
-    libgl1-mesa-glx \
+    # Dependencias básicas para OpenCV (opencv-python incluye la mayoría)
     libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
     libgomp1 \
     # Utilidades
     curl \
