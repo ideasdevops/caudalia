@@ -107,13 +107,14 @@ def index():
             width: 100%;
             border-radius: 10px;
             margin-bottom: 20px;
-            display: none;
+            display: block;
         }
         
         .preview-wrapper {
             position: relative;
             display: none;
             margin-bottom: 20px;
+            width: 100%;
         }
         
         #selectionCanvas {
@@ -375,10 +376,17 @@ def index():
                 reader.onload = (e) => {
                     currentImageData = e.target.result;
                     preview.src = currentImageData;
+                    // Asegurar que la imagen se muestre
+                    previewWrapper.style.display = 'block';
+                    preview.style.display = 'block';
+                    
                     preview.onload = () => {
                         setupPreview();
+                        // Asegurar visibilidad después de cargar
+                        previewWrapper.style.display = 'block';
+                        preview.style.display = 'block';
                     };
-                    previewWrapper.style.display = 'block';
+                    
                     video.style.display = 'none';
                     captureBtn.style.display = 'none';
                     retakeBtn.style.display = 'block';
@@ -413,19 +421,34 @@ def index():
         
         // Configurar preview y canvas de selección
         function setupPreview() {
-            const rect = preview.getBoundingClientRect();
-            selectionCanvas.width = preview.offsetWidth;
-            selectionCanvas.height = preview.offsetHeight;
+            // Esperar a que la imagen se cargue completamente
+            if (preview.complete) {
+                const rect = preview.getBoundingClientRect();
+                selectionCanvas.width = preview.offsetWidth;
+                selectionCanvas.height = preview.offsetHeight;
+            } else {
+                preview.onload = () => {
+                    const rect = preview.getBoundingClientRect();
+                    selectionCanvas.width = preview.offsetWidth;
+                    selectionCanvas.height = preview.offsetHeight;
+                };
+            }
         }
         
         // Activar modo de selección
         selectAreaBtn.addEventListener('click', () => {
             isSelecting = true;
             selectedArea = null;
+            // Asegurar que la imagen esté visible
+            previewWrapper.style.display = 'block';
+            preview.style.display = 'block';
+            // Mostrar canvas de selección sobre la imagen
             selectionCanvas.style.display = 'block';
             selectionInfo.style.display = 'block';
             selectionCanvas.style.cursor = 'crosshair';
             processAreaBtn.style.display = 'none';
+            // Ocultar botón de procesar imagen completa mientras se selecciona
+            processBtn.style.display = 'none';
         });
         
         // Manejar selección de área
@@ -516,13 +539,23 @@ def index():
             if (ancho > 10 && alto > 10) {
                 selectedArea = { x, y, ancho, alto };
                 processAreaBtn.style.display = 'block';
-                selectionInfo.textContent = `Área seleccionada: ${Math.round(ancho)}x${Math.round(alto)}px`;
+                selectionInfo.textContent = `✅ Área seleccionada: ${Math.round(ancho)}x${Math.round(alto)}px - Haz clic en "Procesar Área Seleccionada"`;
+                // Mostrar la imagen y el área seleccionada
+                previewWrapper.style.display = 'block';
+                preview.style.display = 'block';
             }
         }
         
         // Procesar área seleccionada
         processAreaBtn.addEventListener('click', async () => {
-            if (!selectedArea || !currentImageData) return;
+            if (!selectedArea || !currentImageData) {
+                showError('Por favor, selecciona un área primero');
+                return;
+            }
+            
+            // Asegurar que la imagen esté visible
+            previewWrapper.style.display = 'block';
+            preview.style.display = 'block';
             
             loading.style.display = 'block';
             results.style.display = 'none';
@@ -548,6 +581,9 @@ def index():
                 if (data.error) {
                     showError(data.error);
                 } else {
+                    // Mantener la imagen visible y mostrar resultados
+                    previewWrapper.style.display = 'block';
+                    preview.style.display = 'block';
                     displayAreaResults(data);
                 }
             } catch (err) {
@@ -685,6 +721,41 @@ def index():
         function hideError() {
             error.style.display = 'none';
         }
+        
+        // Seleccionar desde galería
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    currentImageData = e.target.result;
+                    preview.src = currentImageData;
+                    
+                    // Asegurar que la imagen se muestre
+                    previewWrapper.style.display = 'block';
+                    preview.style.display = 'block';
+                    
+                    preview.onload = () => {
+                        setupPreview();
+                        // Asegurar visibilidad después de cargar
+                        previewWrapper.style.display = 'block';
+                        preview.style.display = 'block';
+                    };
+                    
+                    video.style.display = 'none';
+                    captureBtn.style.display = 'none';
+                    retakeBtn.style.display = 'block';
+                    processBtn.style.display = 'block';
+                    selectAreaBtn.style.display = 'block';
+                    
+                    if (stream) {
+                        stream.getTracks().forEach(track => track.stop());
+                        stream = null;
+                    }
+                };
+                reader.readAsDataURL(file);
+            }
+        });
         
         // Funcionalidad de escaneo de QR y rellenado de formulario
         let qrStream = null;
